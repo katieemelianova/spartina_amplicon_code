@@ -13,7 +13,9 @@ convert_to_filtered_file_name <- function(x, reads_dir) {
 }
 
 
-reads_directory <- ("/Users/katieemelianova/Desktop/Spartina/JMF_results/JMF-2503-07__all__rRNA_SSU_515_806__JMFR_MSRI_LWRV6")
+#reads_directory <- ("/Users/katieemelianova/Desktop/Spartina/JMF_results/JMF-2503-07__all__rRNA_SSU_515_806__JMFR_MSRI_LWRV6")
+reads_directory <- ("/lisc/scratch/spartina/Results_JMF-2503-07/JMF-2503-07__all__rRNA_SSU_515_806__JMFR_MSRI_LWRV6")
+
 
 read_1_fastq_files <- list.files(reads_directory, pattern = "\\.1\\.fastq.gz$", full.names = TRUE)
 read_2_fastq_files <- list.files(reads_directory, pattern = "\\.2\\.fastq.gz$", full.names = TRUE)
@@ -42,8 +44,6 @@ sample_names <- read_1_filtered_fastq_files %>% basename() %>% str_split_i("\\."
 # dereplicate
 derepFs <- derepFastq(read_1_filtered_fastq_files, verbose=TRUE)
 derepRs <- derepFastq(read_2_filtered_fastq_files, verbose=TRUE)
-
-dadaFs %>% names() %>%
 
 
   
@@ -88,10 +88,10 @@ seqtab.nochim
 
 start.time <- Sys.time()
 taxonomy_raw <- assignTaxonomy(
-  seqs = getSequences(seqtab.nochim)[1:10],
-  refFasta = "/Users/katieemelianova/Desktop/Spartina/spartina_amplicon_code/silva_nr99_v138.2_toGenus_trainset.fa.gz",
+  seqs = seqtab.nochim,
+  refFasta = "/lisc/scratch/spartina/spartina_amplicon_code/silva_nr99_v138.2_toGenus_trainset.fa.gz",
   taxLevels = taxonomy_levels,
-  multithread=TRUE
+  multithread=12
 )
 end.time <- Sys.time()
 time.taken <- end.time - start.time
@@ -99,5 +99,6 @@ time.taken
 
 dim(seqtab.nochim)
 
-rownames(seqtab.nochim)
+
+write.table(taxonomy_raw, "taxonomy_raw", quote=FALSE)
 
