@@ -15,8 +15,8 @@ convert_to_filtered_file_name <- function(x, reads_dir) {
 
 
 
-#reads_directory <- ("/Users/katieemelianova/Desktop/Spartina/JMF_results/JMF-2503-07__all__rRNA_SSU_515_806__JMFR_MSRI_LWRV6")
-reads_directory <- ("/lisc/scratch/spartina/Results_JMF-2503-07/JMF-2503-07__all__rRNA_SSU_515_806__JMFR_MSRI_LWRV6")
+reads_directory <- ("/Users/katieemelianova/Desktop/Spartina/JMF_results/JMF-2503-07__all__rRNA_SSU_515_806__JMFR_MSRI_LWRV6")
+#reads_directory <- ("/lisc/scratch/spartina/Results_JMF-2503-07/JMF-2503-07__all__rRNA_SSU_515_806__JMFR_MSRI_LWRV6")
 
 
 read_1_fastq_files <- list.files(reads_directory, pattern = "\\.1\\.fastq.gz$", full.names = TRUE)
@@ -29,7 +29,7 @@ read_2_filtered_fastq_files <- read_2_fastq_files %>% convert_to_filtered_file_n
 
 out <- filterAndTrim(read_1_fastq_files, read_1_filtered_fastq_files, read_2_fastq_files, read_2_filtered_fastq_files, truncLen=c(220,150),
               maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
-              compress=TRUE, multithread=TRUE) 
+              compress=TRUE, multithread=FALSE) 
 
 # read them in again to get existing files only, I guess some files do not pass filtering and dont get created
 read_1_filtered_fastq_files <- list.files(reads_directory, pattern = "\\.1\\.filtered.fastq.gz$", full.names = TRUE)
@@ -52,8 +52,8 @@ names(F_read_2_dereplicated) <- F_read_2_dereplicated %>% names() %>% str_split_
 names(R_read_2_dereplicated) <- R_read_2_dereplicated %>% names() %>% str_split_i("\\.", 1) %>% str_split_i("-", 4)
 
 # error estimation (on the unsplit reads, 1 and 2, as per JMF code also)
-err1 <- learnErrors(derep1s, multithread=TRUE)
-err2 <- learnErrors(derep2s, multithread=TRUE)
+err1 <- learnErrors(derep1s, multithread=FALSE)
+err2 <- learnErrors(derep2s, multithread=FALSE)
 plotErrors(err1, nominalQ=TRUE)
 
 # run dada inference on split reads using the error estimates from unsplit reads - check if this is correct?
@@ -67,12 +67,29 @@ merged <- mergePairs(
   dadaF = c(dadaF1, dadaR1),
   dadaR = c(dadaF2, dadaR2),
   derepF = c(F_read_1_dereplicated, R_read_1_dereplicated),
-  derepR = c(F_read_2_dereplicated, R_read_2_dereplicated))
+  derepR = c(F_read_2_dereplicated, R_read_2_dereplicated),
+  justConcatenate = TRUE)
 
 
-length(merged)
+
+matrix_to_data_table <- function(x, names) {
+  x <- as.data.table(x, keep.rownames = TRUE)
+  x <- melt(x, id.vars = "rn", variable.factor = FALSE)
+  setnames(x, names)
+  x
+}
+
+test <- seqtab %>% matrix_to_data_table(c("FASTQ_pair", "Sequence", "Count"))
+
+
 # make an ASV table
 seqtab <- makeSequenceTable(merged)
+
+seqtab
+DADA2_raw_results <- DADA2_raw_results[Count > 0]
+
+
+seqtab %>% rownames()
 
 # remove chimeras
 seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
@@ -93,7 +110,111 @@ taxa <- assignTaxonomy(
 
 taxa <- addSpecies(taxa, "/lisc/scratch/spartina/spartina_amplicon_code/silva_v138.2_assignSpecies.fa.gz")
 
-write.table(taxa, "taxonomy_species", quote=FALSE)
+write.table(taxa, "taxonomy_species_europe", quote=FALSE)
+
+
+
+
+
+library(phyloseq)
+taxonomy_species_europe <- read_delim("taxonomy_species_europe") %>% set_colnames(c("sequence", "Domain", "Phylum", "Class", "Order", "Family", "Genus")) %>% column_to_rownames("sequence")
+
+samplesheet <- readxl::read_xlsx("/Users/katieemelianova/Desktop/Spartina/JMF_results/Results_2025-04-30/JMF-2503-07.xlsx")[1:80,]
+samplesheet_marshinfo <- readxl::read_xlsx("/Users/katieemelianova/Desktop/Spartina/Sequencing/March2025_LeFaouAmplicon/LeFaou_samplesheet.xlsx")
+
+
+
+inner_join(samplesheet_marshinfo, samplesheet, by="User sample ID")$`JMF sample ID.y`
+
+
+
+# !!! I tried to set the sample ID as the sample number e.e.g 0001 etc and this led me on a wild goose chase when the plot_bar failed to work
+# turns out phyloseq doesnt like sample names which are integers, writing this down for posterity
+sample_metadata <- inner_join(samplesheet_marshinfo, samplesheet, by="User sample ID") %>% 
+  #mutate(sample_id=str_split_i(`JMF sample ID.y`, "-", 4), 
+         mutate(sample_id=`JMF sample ID.y` %>% str_replace_all("-", "."), 
+         compartment=case_when(`Sample description.y` == "soil from saltmarsch" ~ "Sediment", 
+                               `Sample description.y` == "spartina roots" ~ "Root"),
+         elevation = case_when(`Sample description.x` == "Sediment marsh" ~ "low",
+                               `Sample description.x` == "Sediment dry" ~ "high",
+                               `Sample description.x` == "Root marsh" ~ "low",
+                               `Sample description.x` == "Root dry" ~ "high",
+                               `Sample description.x` %in% c("Sedment unknown", "Root unknown") ~ "remove")) %>% 
+  dplyr::select(elevation, `concentration (ng/µL) (NanoDrop).x`, compartment, `User sample ID`, sample_id) %>% 
+  set_colnames(c("elevation", "concentration", "compartment", "user_id", "sample_id"))
+sample_metadata %<>% data.frame() %>% set_rownames(sample_metadata$sample_id)
+
+rownames(seqtab.nochim) <- rownames(seqtab.nochim) %>% str_remove("[a-zA-Z]$")
+
+
+
+# make a phyloseq object 
+ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=TRUE), 
+               sample_data(sample_metadata), 
+               tax_table(taxonomy_species_europe) %>% set_rownames(rownames(taxonomy_species_europe)) %>% set_colnames(c("Domain", "Phylum", "Class", "Order", "Family", "Genus")))
+
+
+# remove samples with unknown marsh elevation
+ps <- subset_samples(ps, elevation != "remove")
+
+# convert concentration tonumeric from character
+ps@sam_data$concentration <- as.numeric(ps@sam_data$concentration)
+
+# I get a warning about singletons with this command but see https://github.com/benjjneb/dada2/issues/214
+# here I plot diversity vs concentration, coloured by compartment and eleveation
+plot_richness(ps, x="concentration", measures=c("Shannon", "Simpson"), color="elevation", shape="compartment") + geom_point(size = 3.5)
+
+ps.prop <- transform_sample_counts(ps, function(otu) otu/sum(otu))
+ord.nmds.bray <- ordinate(ps.prop, method="NMDS", distance="bray")
+plot_ordination(ps.prop, ord.nmds.bray, color="elevation", title="Bray NMDS", shape="compartment") + geom_point(size = 7)
+
+
+
+
+##### giving up on raw data plottingbecause I think the samples need further library F/R merging 
+##### need to ask JMF how to merge without using sequence IDs (I want to keep the ASV seqs as seqIDs)
+##### running analysis plots using the final datasets provided by JMF for now
+
+otumat <- read.table("/Users/katieemelianova/Desktop/Spartina/JMF_results/Results_2025-04-30/JMF-2503-07__all__rRNA_SSU_515_806__JMFR_MSRI_LWRV6/DADA2_counts_as_matrix.tsv", header=TRUE) %>%
+  column_to_rownames(var="Sequence_ID")
+taxmat <- read_delim("/Users/katieemelianova/Desktop/Spartina/JMF_results/Results_2025-01-22/JMF-2411-14__all__rRNA_SSU_515_806__JMFR_MSP0_LTT22/DADA2_ASVs.rRNA_SSU.SILVA_reference.DADA2_classified.tsv") %>%
+  column_to_rownames(var="Sequence_ID")
+OTU = otu_table(otumat, taxa_are_rows = TRUE)
+sample_names(OTU) %<>% str_remove("A")
+TAX = tax_table(taxmat)
+rownames(TAX) <- rownames(taxmat)
+colnames(TAX) <- colnames(taxmat)
+
+ps <- phyloseq(OTU, 
+               sample_data(sample_metadata), 
+               TAX)
+
+
+
+# remove samples with unknown marsh elevation
+ps <- subset_samples(ps, elevation != "remove")
+
+# convert concentration tonumeric from character
+ps@sam_data$concentration <- as.numeric(ps@sam_data$concentration)
+
+
+# I get a warning about singletons with this command but see https://github.com/benjjneb/dada2/issues/214
+# here I plot diversity vs concentration, coloured by compartment and eleveation
+plot_richness(ps, x="concentration", measures=c("Shannon", "Simpson"), color="elevation", shape="compartment") + geom_point(size = 3.5)
+
+ps.prop <- transform_sample_counts(ps, function(otu) otu/sum(otu))
+ord.nmds.bray <- ordinate(ps.prop, method="NMDS", distance="bray")
+plot_ordination(ps.prop, ord.nmds.bray, color="elevation", title="Bray NMDS", shape="compartment") + geom_point(size = 7)
+
+
+
+
+ps_rel <- transform_sample_counts(ps, function(OTU) OTU/sum(OTU) )
+ps_rel <- subset_taxa(ps_rel, Family == "Sedimenticolaceae") %>% subset_taxa(!(is.na(Genus))) 
+plot_bar(ps_rel, fill="Genus") + facet_wrap(~compartment+elevation, scales="free_x", ncol=2)
+
+
+
 
 
 
