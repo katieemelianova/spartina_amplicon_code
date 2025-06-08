@@ -39,4 +39,45 @@ err1 <- learnErrors(derep1s, multithread=TRUE)
 err2 <- learnErrors(derep2s, multithread=TRUE)
 plotErrors(err1, nominalQ=TRUE)
 
+# run dada inference
+dada1 <- dada(derep1s, err=err1, multithread=TRUE)
+dada2 <- dada(derep2s, err=err1, multithread=TRUE)
+
+# merge paired reads
+merged <- mergePairs(
+  dadaF = dada1,
+  dadaR = dada2,
+  derepF = derep1s,
+  derepR = derep2s,
+  justConcatenate = TRUE)
+
+
+# make an ASV table
+seqtab <- makeSequenceTable(merged)
+
+# remove chimeras
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim)
+
+
+# way to subset the seqtable
+#getSequences(seqtab.nochim)[1:5]
+
+taxonomy_levels <- c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+
+taxa <- assignTaxonomy(
+  seqs = seqtab.nochim,
+  refFasta = "/lisc/scratch/spartina/spartina_amplicon_code/silva_nr99_v138.2_toGenus_trainset.fa.gz",
+  taxLevels = taxonomy_levels,
+  multithread=12
+)
+
+taxa <- addSpecies(taxa, "/lisc/scratch/spartina/spartina_amplicon_code/silva_v138.2_assignSpecies.fa.gz")
+
+write.table(taxa, "taxonomy_species_america", quote=FALSE)
+
+
+taxonomy_species_america
+
+
 
