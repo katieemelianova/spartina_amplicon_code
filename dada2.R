@@ -79,22 +79,12 @@ matrix_to_data_table <- function(x, names) {
   x
 }
 
-test <- seqtab %>% matrix_to_data_table(c("FASTQ_pair", "Sequence", "Count"))
-
-
 # make an ASV table
 seqtab <- makeSequenceTable(merged)
-
-seqtab
-DADA2_raw_results <- DADA2_raw_results[Count > 0]
-
-
-seqtab %>% rownames()
 
 # remove chimeras
 seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
 dim(seqtab.nochim)
-
 
 # way to subset the seqtable
 #getSequences(seqtab.nochim)[1:5]
@@ -122,12 +112,6 @@ taxonomy_species_europe <- read_delim("taxonomy_species_europe") %>% set_colname
 samplesheet <- readxl::read_xlsx("/Users/katieemelianova/Desktop/Spartina/JMF_results/Results_2025-04-30/JMF-2503-07.xlsx")[1:80,]
 samplesheet_marshinfo <- readxl::read_xlsx("/Users/katieemelianova/Desktop/Spartina/Sequencing/March2025_LeFaouAmplicon/LeFaou_samplesheet.xlsx")
 
-
-
-inner_join(samplesheet_marshinfo, samplesheet, by="User sample ID")$`JMF sample ID.y`
-
-
-
 # !!! I tried to set the sample ID as the sample number e.e.g 0001 etc and this led me on a wild goose chase when the plot_bar failed to work
 # turns out phyloseq doesnt like sample names which are integers, writing this down for posterity
 sample_metadata <- inner_join(samplesheet_marshinfo, samplesheet, by="User sample ID") %>% 
@@ -139,7 +123,9 @@ sample_metadata <- inner_join(samplesheet_marshinfo, samplesheet, by="User sampl
                                `Sample description.x` == "Sediment dry" ~ "high",
                                `Sample description.x` == "Root marsh" ~ "low",
                                `Sample description.x` == "Root dry" ~ "high",
-                               `Sample description.x` %in% c("Sedment unknown", "Root unknown") ~ "remove")) %>% 
+                               `Sample description.x` %in% c("Sedment unknown", "Root unknown") ~ "remove"),
+         compartment = case_when(compartment == "Sediment" ~"rhizosphere",
+                                 compartment == "Root" ~"endosphere")) %>% 
   dplyr::select(elevation, `concentration (ng/µL) (NanoDrop).x`, compartment, `User sample ID`, sample_id) %>% 
   set_colnames(c("elevation", "concentration", "compartment", "user_id", "sample_id"))
 sample_metadata %<>% data.frame() %>% set_rownames(sample_metadata$sample_id)
@@ -149,10 +135,20 @@ rownames(seqtab.nochim) <- rownames(seqtab.nochim) %>% str_remove("[a-zA-Z]$")
 
 
 # make a phyloseq object 
+
+ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=TRUE), 
+               sample_data(sample_metadata), 
+               tax_table(taxonomy_species_europe))
+               
 ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=TRUE), 
                sample_data(sample_metadata), 
                tax_table(taxonomy_species_europe) %>% set_rownames(rownames(taxonomy_species_europe)) %>% set_colnames(c("Domain", "Phylum", "Class", "Order", "Family", "Genus")))
 
+
+test <- tax_table(taxonomy_species_europe) %>% set_rownames(rownames(taxonomy_species_europe)) %>% set_colnames(c("Domain", "Phylum", "Class", "Order", "Family", "Genus"))
+
+taxa_names(test)
+taxonomy_species_europe %>% set_rownames(rownames(taxonomy_species_europe)) %>% set_colnames(c("Domain", "Phylum", "Class", "Order", "Family", "Genus")) %>% dplyr::select(Genus)
 
 # remove samples with unknown marsh elevation
 ps <- subset_samples(ps, elevation != "remove")
@@ -204,17 +200,41 @@ plot_richness(ps, x="concentration", measures=c("Shannon", "Simpson"), color="el
 
 ps.prop <- transform_sample_counts(ps, function(otu) otu/sum(otu))
 ord.nmds.bray <- ordinate(ps.prop, method="NMDS", distance="bray")
-plot_ordination(ps.prop, ord.nmds.bray, color="elevation", title="Bray NMDS", shape="compartment") + geom_point(size = 7)
+plot_ordination(ps.prop, ord.nmds.bray, color="elevation", title="Bray NMDS", shape="compartment") + 
+  geom_point(size = 7) +
+  theme(strip.text.x = element_text(size=25),
+        axis.text.x = element_text(size=25),
+        axis.text.y = element_text(size=20),
+        axis.title = element_text(size=25),
+        legend.title = element_text(size=20),
+        legend.text = element_text(size=20))
 
 
 
 
 ps_rel <- transform_sample_counts(ps, function(OTU) OTU/sum(OTU) )
-ps_rel <- subset_taxa(ps_rel, Family == "Sedimenticolaceae") %>% subset_taxa(!(is.na(Genus))) 
-plot_bar(ps_rel, fill="Genus") + facet_wrap(~compartment+elevation, scales="free_x", ncol=2)
+ps_rel <- subset_taxa(ps_rel, Genus == "Sedimenticola") %>% subset_taxa(!(is.na(Genus))) 
+ps_rel = tax_glom(ps_rel, "Genus")
+plot_bar(ps_rel, fill="Genus") + facet_wrap(~elevation+compartment, scales="free_x", ncol=2) + 
+  theme(strip.text.x = element_text(size=25),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size=20),
+        axis.title = element_text(size=25),
+        legend.title = element_blank(),
+        legend.text = element_text(size=20),
+        axis.ticks.x = element_blank()) +
+  ylab("Relative Abundance")
 
 
+tree_all <- ggtree::read.tree("america_europe_sedimenticola_tree.newick")
+tree_all$tip.label <- str_remove_all(tree_all$tip.label, "'")
+tree_all$range <- case_when(startsWith(tree_all$tip.label, "america") ~ "USA",
+                            startsWith(tree_all$tip.label, "europe") ~ "France")
 
+ggtree(tree_all)  + geom_tiplab()
 
-
+dd <- data.frame(taxa=tree_all$tip.label,
+                 tipcols=tree_all$range)
+p<-ggtree(tree_all, size=0.5)
+p %<+% dd + geom_tippoint(aes(color=tipcols), size=2)
 
