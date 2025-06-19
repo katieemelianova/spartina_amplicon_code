@@ -82,17 +82,17 @@ write.table(taxa_jr, "taxonomy_species_america", quote=FALSE)
 
 
 
-taxonomy_species_america <- read_delim("taxonomy_species_america") %>% set_colnames(c("sequence", "Domain", "Phylum", "Class", "Order", "Family")) %>% column_to_rownames("sequence") %>% separate(Family, sep=" ", c("Family", "Genus"))
+taxonomy_species_america <- read_delim("taxonomy_species_america") %>% set_colnames(c("sequence", "Domain", "Phylum", "Class", "Order", "Family")) %>% column_to_rownames("sequence") %>% separate(Family, sep=" ", c("Family", "Genus"), extra="merge")
 samplesheet <- read_delim("/Users/katieemelianova/Desktop/Spartina/spartina_amplicon_code/JR_metadata.csv")
 
 metadata_jr <- samplesheet %>% dplyr::select(Run, HOST, isolation_source) %>% 
   mutate(depth=case_when(grepl("5-10", isolation_source) ~ "5-10",
                          grepl("0-5", isolation_source) ~ "0-5")) %>%
-  mutate(height=case_when(grepl("Tall", isolation_source) ~ "Tall",
-                          grepl("Short", isolation_source) ~ "Short",
+  mutate(height=case_when(grepl("Tall", isolation_source) ~ "Tall Phenotype",
+                          grepl("Short", isolation_source) ~ "Short Phenotype",
                           grepl("Medium", isolation_source) ~ "Medium")) %>%
-  mutate(compartment=case_when(grepl("Endosphere", isolation_source) ~ "endosphere",
-                               grepl("Rhizosphere", isolation_source) ~ "rhizosphere",
+  mutate(compartment=case_when(grepl("Endosphere", isolation_source) ~ "Endosphere",
+                               grepl("Rhizosphere", isolation_source) ~ "Rhizosphere",
                                grepl("sediment", isolation_source) ~ "sediment")) %>%
   mutate(sample_id=Run) %>%
   dplyr::select(-isolation_source) %>%
@@ -130,11 +130,16 @@ plot_ordination(ps.prop_jr, ord.nmds.bray_jr, color="height", title="Bray NMDS",
 
 
 ps_rel_jr <- transform_sample_counts(ps_jr, function(OTU) OTU/sum(OTU) )
-ps_rel_jr <- subset_taxa(ps_rel_jr, Genus == "Sedimenticola") %>% subset_taxa(!(is.na(Genus))) %>% subset_taxa(!(Genus == "NA"))
-## did this to remove black slices as per https://github.com/joey711/phyloseq/issues/721
-phylumGlommed = tax_glom(ps_rel_jr, "Genus")
-plot_bar(phylumGlommed, fill="Genus") + facet_wrap(~height+compartment, scales="free_x", ncol=2) + 
-  theme(strip.text.x = element_text(size=25),
+#ps_rel_jr <- subset_taxa(ps_rel_jr, Genus == "Sedimenticola") %>% subset_taxa(!(is.na(Genus))) %>% subset_taxa(!(Genus == "NA"))
+#ps_rel_jr <- subset_taxa(ps_rel_jr, Genus == "Candidatus Thiodiazotropha") %>% subset_taxa(!(is.na(Genus))) %>% subset_taxa(!(Genus == "NA"))
+
+
+barplot_jr_thiodiazotropha <- subset_taxa(ps_rel_jr, Genus == "Candidatus Thiodiazotropha") %>% 
+  subset_taxa(!(is.na(Genus))) %>% 
+  subset_taxa(!(Genus == "NA")) %>%
+  tax_glom("Genus") %>% ## did this to remove black slices as per https://github.com/joey711/phyloseq/issues/721
+  plot_bar(fill="Genus") + facet_wrap(~height+compartment, scales="free_x", ncol=2) + 
+  theme(strip.text.x = element_text(size=20),
         axis.text.x = element_blank(),
         axis.text.y = element_text(size=20),
         axis.title = element_text(size=25),
@@ -142,6 +147,59 @@ plot_bar(phylumGlommed, fill="Genus") + facet_wrap(~height+compartment, scales="
         legend.text = element_text(size=20),
         axis.ticks.x = element_blank()) +
   ylab("Relative Abundance")
+
+
+
+barplot_jr_sedimenticola <- subset_taxa(ps_rel_jr, Genus == "Sedimenticola") %>% 
+  subset_taxa(!(is.na(Genus))) %>% 
+  subset_taxa(!(Genus == "NA")) %>%
+  tax_glom("Genus") %>% ## did this to remove black slices as per https://github.com/joey711/phyloseq/issues/721
+  plot_bar(fill="Genus") + facet_wrap(~height+compartment, scales="free_x", ncol=2) + 
+  theme(strip.text.x = element_text(size=20),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size=20),
+        axis.title = element_text(size=25),
+        legend.title = element_blank(),
+        legend.text = element_text(size=20),
+        axis.ticks.x = element_blank()) +
+  ylab("Relative Abundance")
+
+
+
+
+sedi_cowplot <- cowplot::plot_grid(barplot_sedimenticola + theme(legend.position="none") + xlab("France Samples") + ylim(0, 0.015), 
+                   barplot_jr_sedimenticola + xlab("USA Samples") + ylim(0, 0.015),
+                   rel_widths = c(0.73, 1))
+
+
+thio_cowplot <- cowplot::plot_grid(barplot_thiodiazotropha + theme(legend.position="none") + xlab("France Samples") + ylim(0, 0.3), 
+                   barplot_jr_thiodiazotropha + xlab("USA Samples"),
+                   rel_widths = c(0.55, 1))
+
+
+pdf("sedimenticola_relative_abundance.pdf", height=8, width=15)
+sedi_cowplot
+dev.off()
+
+pdf("thiodiazotropha_relative_abundance.pdf", height=8, width=16)
+thio_cowplot
+dev.off()
+
+
+
+#################################################################
+#               get sequences of Sedimenticola                  #
+#################################################################
+
+sedimenticola_asv_jr <- subset_taxa(ps_jr, Genus == "Sedimenticola")
+sedimenticola_asv_seqs_jr <- sedimenticola_asv_jr@otu_table %>% colnames() %>% unique()
+thiodiazotropha_asv_jr <- subset_taxa(ps_jr, Genus == "Candidatus Thiodiazotropha")
+thiodiazotropha_asv_seqs_jr <- thiodiazotropha_asv_jr@otu_table %>% colnames() %>% unique()
+
+write.fasta(as.list(sedimenticola_asv_seqs_jr), paste0("usa_", 1:length(sedimenticola_asv_seqs_jr)), "sedimenticola_asv_seqs_usa.fasta")
+write.fasta(as.list(thiodiazotropha_asv_seqs_jr), paste0("usa_", 1:length(sedimenticola_asv_seqs_jr)), "thiodiazotropha_asv_seqs_usa.fasta")
+
+
 
 
 

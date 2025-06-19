@@ -4,6 +4,8 @@ library(magrittr)
 library(readr)
 library(stringr)
 library(tidyverse)
+library(msa)
+library(seqinr)
 
 convert_to_filtered_file_name <- function(x, reads_dir) {
   x %>%
@@ -119,13 +121,13 @@ sample_metadata <- inner_join(samplesheet_marshinfo, samplesheet, by="User sampl
          mutate(sample_id=`JMF sample ID.y` %>% str_replace_all("-", "."), 
          compartment=case_when(`Sample description.y` == "soil from saltmarsch" ~ "Sediment", 
                                `Sample description.y` == "spartina roots" ~ "Root"),
-         elevation = case_when(`Sample description.x` == "Sediment marsh" ~ "low",
-                               `Sample description.x` == "Sediment dry" ~ "high",
-                               `Sample description.x` == "Root marsh" ~ "low",
-                               `Sample description.x` == "Root dry" ~ "high",
+         elevation = case_when(`Sample description.x` == "Sediment marsh" ~ "Low Elevation",
+                               `Sample description.x` == "Sediment dry" ~ "High Elevation",
+                               `Sample description.x` == "Root marsh" ~ "Low Elevation",
+                               `Sample description.x` == "Root dry" ~ "High Elevation",
                                `Sample description.x` %in% c("Sedment unknown", "Root unknown") ~ "remove"),
-         compartment = case_when(compartment == "Sediment" ~"rhizosphere",
-                                 compartment == "Root" ~"endosphere")) %>% 
+         compartment = case_when(compartment == "Sediment" ~"Rhizosphere",
+                                 compartment == "Root" ~"Endosphere")) %>% 
   dplyr::select(elevation, `concentration (ng/µL) (NanoDrop).x`, compartment, `User sample ID`, sample_id) %>% 
   set_colnames(c("elevation", "concentration", "compartment", "user_id", "sample_id"))
 sample_metadata %<>% data.frame() %>% set_rownames(sample_metadata$sample_id)
@@ -173,8 +175,9 @@ plot_ordination(ps.prop, ord.nmds.bray, color="elevation", title="Bray NMDS", sh
 
 otumat <- read.table("/Users/katieemelianova/Desktop/Spartina/JMF_results/Results_2025-04-30/JMF-2503-07__all__rRNA_SSU_515_806__JMFR_MSRI_LWRV6/DADA2_counts_as_matrix.tsv", header=TRUE) %>%
   column_to_rownames(var="Sequence_ID")
-taxmat <- read_delim("/Users/katieemelianova/Desktop/Spartina/JMF_results/Results_2025-01-22/JMF-2411-14__all__rRNA_SSU_515_806__JMFR_MSP0_LTT22/DADA2_ASVs.rRNA_SSU.SILVA_reference.DADA2_classified.tsv") %>%
+taxmat <- read_delim("/Users/katieemelianova/Desktop/Spartina/JMF_results/Results_2025-04-30/JMF-2503-07__all__rRNA_SSU_515_806__JMFR_MSRI_LWRV6/DADA2_ASVs.rRNA_SSU.SILVA_reference.DADA2_classified.tsv") %>%
   column_to_rownames(var="Sequence_ID")
+
 OTU = otu_table(otumat, taxa_are_rows = TRUE)
 sample_names(OTU) %<>% str_remove("A")
 TAX = tax_table(taxmat)
@@ -213,10 +216,12 @@ plot_ordination(ps.prop, ord.nmds.bray, color="elevation", title="Bray NMDS", sh
 
 
 ps_rel <- transform_sample_counts(ps, function(OTU) OTU/sum(OTU) )
-ps_rel <- subset_taxa(ps_rel, Genus == "Sedimenticola") %>% subset_taxa(!(is.na(Genus))) 
-ps_rel = tax_glom(ps_rel, "Genus")
-plot_bar(ps_rel, fill="Genus") + facet_wrap(~elevation+compartment, scales="free_x", ncol=2) + 
-  theme(strip.text.x = element_text(size=25),
+
+
+barplot_thiodiazotropha <- subset_taxa(ps_rel, Genus == "Candidatus Thiodiazotropha") %>% subset_taxa(!(is.na(Genus))) %>% 
+  tax_glom("Genus") %>%
+  plot_bar(fill="Genus") + facet_wrap(~elevation+compartment, scales="free_x", ncol=2) + 
+  theme(strip.text.x = element_text(size=20),
         axis.text.x = element_blank(),
         axis.text.y = element_text(size=20),
         axis.title = element_text(size=25),
@@ -225,16 +230,100 @@ plot_bar(ps_rel, fill="Genus") + facet_wrap(~elevation+compartment, scales="free
         axis.ticks.x = element_blank()) +
   ylab("Relative Abundance")
 
+barplot_sedimenticola <- subset_taxa(ps_rel, Genus == "Sedimenticola") %>% subset_taxa(!(is.na(Genus))) %>% 
+  tax_glom("Genus") %>%
+  plot_bar(fill="Genus") + facet_wrap(~elevation+compartment, scales="free_x", ncol=2) + 
+  theme(strip.text.x = element_text(size=20),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size=20),
+        axis.title = element_text(size=25),
+        legend.title = element_blank(),
+        legend.text = element_text(size=20),
+        axis.ticks.x = element_blank()) +
+  ylab("Relative Abundance")
+  
 
-tree_all <- ggtree::read.tree("america_europe_sedimenticola_tree.newick")
-tree_all$tip.label <- str_remove_all(tree_all$tip.label, "'")
-tree_all$range <- case_when(startsWith(tree_all$tip.label, "america") ~ "USA",
-                            startsWith(tree_all$tip.label, "europe") ~ "France")
 
-ggtree(tree_all)  + geom_tiplab()
 
-dd <- data.frame(taxa=tree_all$tip.label,
-                 tipcols=tree_all$range)
-p<-ggtree(tree_all, size=0.5)
-p %<+% dd + geom_tippoint(aes(color=tipcols), size=2)
+
+
+
+
+
+#################################################################
+#               get sequences of Sedimenticola                  #
+#################################################################
+
+asv_mapping <- read_tsv("/Users/katieemelianova/Desktop/Spartina/JMF_results/Results_2025-04-30/JMF-2503-07__all__rRNA_SSU_515_806__JMFR_MSRI_LWRV6/DADA2_results.tsv")
+sedimenticola_asv <- subset_taxa(ps, Genus == "Sedimenticola")
+thiodiazotropha_asv <- subset_taxa(ps, Genus == "Candidatus Thiodiazotropha")
+sedimenticola_asv_seqs <- asv_mapping %>% filter(Sequence_ID %in% rownames(sedimenticola_asv@otu_table)) %>% pull(Sequence) %>% unique()
+thiodiazotropha_asv_seqs <- asv_mapping %>% filter(Sequence_ID %in% rownames(thiodiazotropha_asv@otu_table)) %>% pull(Sequence) %>% unique()
+
+
+write.fasta(as.list(sedimenticola_asv_seqs), paste0("france_", 1:length(sedimenticola_asv_seqs)), "sedimenticola_asv_seqs_france.fasta")
+write.fasta(as.list(thiodiazotropha_asv_seqs), paste0("france_", 1:length(sedimenticola_asv_seqs)), "thiodiazotropha_asv_seqs_france.fasta")
+
+
+
+thiodiazotropha_asv_seqs_all_tree.newick
+
+
+
+
+
+
+##############################################
+#               sedimenticola                #
+##############################################
+
+# aligned with mafft and made a tree using geneious tree builder
+tree_all_sedi <- ggtree::read.tree("sedimenticola_asv_seqs_all tree.newick")
+tree_all_sedi$tip.label <- str_remove_all(tree_all_sedi$tip.label, "'")
+tree_all_sedi$range <- case_when(startsWith(tree_all_sedi$tip.label, "usa") ~ "USA",
+                            startsWith(tree_all_sedi$tip.label, "france") ~ "France")
+
+ggtree(tree_all_sedi)  + geom_tiplab()
+
+dd <- data.frame(taxa=tree_all_sedi$tip.label,
+                 Sedimenticola=tree_all_sedi$range)
+p<-ggtree(tree_all_sedi, size=0.3, colour="gray60")
+
+pdf("sedimenticola_asv_seqs_all_sourcetree.pdf", height=15, width=10)
+p %<+% dd + geom_tippoint(aes(color=Sedimenticola, size=Sedimenticola)) + 
+  theme(legend.title = element_text(size=25),
+        legend.text = element_text(size=20)) +
+  scale_colour_manual(values=c("deeppink2", "darkolivegreen4")) +
+  scale_size_manual(values=c(4, 1.2)) +
+  guides(size = guide_legend(override.aes = list(size = 7)))
+dev.off()
+
+
+##############################################
+#             thiodiazotropha                #
+##############################################
+
+tree_all_thio <- ggtree::read.tree("thiodiazotropha_asv_seqs_all_tree.newick")
+tree_all_thio$tip.label <- str_remove_all(tree_all_thio$tip.label, "'")
+tree_all_thio$range <- case_when(startsWith(tree_all_thio$tip.label, "usa") ~ "USA",
+                                 startsWith(tree_all_thio$tip.label, "france") ~ "France")
+
+ggtree(tree_all_thio)  + geom_tiplab()
+
+dd <- data.frame(taxa=tree_all_thio$tip.label,
+                 Thiodiazotropha=tree_all_thio$range)
+p<-ggtree(tree_all_thio, size=0.3, colour="gray60")
+
+pdf("thiodiazotropha_asv_seqs_all_sourcetree.pdf", height=15, width=10)
+p %<+% dd + geom_tippoint(aes(color=Thiodiazotropha, size=Thiodiazotropha)) + 
+  theme(legend.title = element_text(size=25),
+        legend.text = element_text(size=20)) +
+  scale_colour_manual(values=c("deeppink2", "darkolivegreen4")) +
+  scale_size_manual(values=c(4, 1.2)) +
+  guides(size = guide_legend(override.aes = list(size = 7)))
+dev.off()
+
+
+
+
 
