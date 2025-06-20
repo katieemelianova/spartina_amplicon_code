@@ -325,5 +325,187 @@ dev.off()
 
 
 
+####################################################
+#          functional annotation of taxa           #
+####################################################
+
+
+functional <- readxl::read_xlsx("/Users/katieemelianova/Desktop/Spartina/JR_functionally_annotated_genera.xlsx", skip=2) %>% 
+  dplyr::select("S/Sulfate reducing genera", "Sulfur oxidizing genera", "Iron oxidizing genera", "Nitrifying genera") %>%
+  set_colnames(c("sulfate_reducers", "sulfur_oxidisers", "iron_oxidisers", "nitrifiers"))
+
+sulfate_reducers <- functional %>% dplyr::select(sulfate_reducers) %>% drop_na() %>% pull() %>% str_replace_all("_", " ")
+sulfur_oxidisers <- functional %>% dplyr::select(sulfur_oxidisers) %>% drop_na() %>% pull() %>% str_replace_all("_", " ")
+iron_oxidisers <- functional %>% dplyr::select(iron_oxidisers) %>% drop_na() %>% pull() %>% str_replace_all("_", " ")
+nitrifiers <- functional %>% dplyr::select(nitrifiers) %>% drop_na() %>% pull() %>% str_replace_all("_", " ")
+
+
+
+
+############## sulfur oxidisers ###########
+
+
+
+
+transform_and_glom <- function(ps_object, taxon_list, filter_value){
+  ps_object <<- ps_object
+  taxon_list <<- taxon_list
+  filter_value <<- filter_value
+  transformed_and_glommed <- subset_taxa(ps_object, Genus %in% taxon_list) %>%
+    subset_samples(compartment == filter_value) %>%
+    tax_glom("Genus", NArm = F) %>% 
+    transform_sample_counts(function(x) {x * 100/sum(x)})
+  return(transformed_and_glommed)
+}
+
+
+get_mean_abundance <- function(ps_object, taxon_list, filter_value, transpose=FALSE){
+  transformed_and_glommed <- transform_and_glom(ps_object, taxon_list, filter_value)
+  if (transpose == TRUE){
+    mean_abundance <- data.frame(Genus = tax_table(transformed_and_glommed)[,"Genus"], Mean = rowMeans(otu_table(transformed_and_glommed) %>% t()), row.names = NULL)
+  } else {
+    mean_abundance <- data.frame(Genus = tax_table(transformed_and_glommed)[,"Genus"], Mean = rowMeans(otu_table(transformed_and_glommed)), row.names = NULL)
+  }
+  return(mean_abundance)
+}
+
+
+
+taxon_list <- sulfur_oxidisers
+filter_value <- "Rhizosphere"     # I have to declare these variables first because see https://github.com/joey711/phyloseq/issues/1695
+france_sulfur_oxidisers_rhizospere_mean <- get_mean_abundance(ps_rel, taxon_list, filter_value)
+usa_sulfur_oxidisers_rhizospere_mean <- get_mean_abundance(ps_rel_jr, taxon_list, filter_value, transpose=TRUE)
+filter_value <- "Endosphere"
+france_sulfur_oxidisers_endosphere_mean <- get_mean_abundance(ps_rel, taxon_list, filter_value)
+usa_sulfur_oxidisers_endosphere_mean <- get_mean_abundance(ps_rel_jr, taxon_list, filter_value, transpose=TRUE)
+sulfur_oxidisers_all <- inner_join(france_sulfur_oxidisers_rhizospere_mean,
+                                   france_sulfur_oxidisers_endosphere_mean, 
+                                   usa_sulfur_oxidisers_rhizospere_mean,
+                                   usa_sulfur_oxidisers_endosphere_mean, by="Genus") %>% 
+  set_colnames(c("Genus", "france_mean", "usa_mean")) %>%
+  reshape2::melt() %>%
+  mutate("role" = "Sulfur Oxidiser")
+
+inner_join(inner_join(france_sulfur_oxidisers_rhizospere_mean,
+           france_sulfur_oxidisers_endosphere_mean,
+           by="Genus"),
+           inner_join(usa_sulfur_oxidisers_rhizospere_mean,
+           usa_sulfur_oxidisers_endosphere_mean,
+           by="Genus"),
+           by="Genus")
+
+
+
+
+
+france_sulfur_oxidisers_rhizosphere <- subset_taxa(ps_rel, Genus %in% sulfur_oxidisers) %>%
+  subset_samples(compartment == "Rhizosphere") %>%
+  tax_glom("Genus", NArm = F) %>% 
+  transform_sample_counts(function(x) {x * 100/sum(x)})
+
+france_sulfur_oxidisers_endosphere <- subset_taxa(ps_rel, Genus %in% sulfur_oxidisers) %>%
+  subset_samples(compartment == "Endosphere") %>%
+  tax_glom("Genus", NArm = F) %>% 
+  transform_sample_counts(function(x) {x * 100/sum(x)})
+
+usa_sulfur_oxidisers_rhizosphere <- subset_taxa(ps_rel_jr, Genus %in% sulfur_oxidisers) %>%
+  subset_samples(compartment == "Rhizosphere") %>%
+  tax_glom("Genus", NArm = F) %>% 
+  transform_sample_counts(function(x) {x * 100/sum(x)})
+
+usa_sulfur_oxidisers_endosphere <- subset_taxa(ps_rel_jr, Genus %in% sulfur_oxidisers) %>%
+  subset_samples(compartment == "Endosphere") %>%
+  tax_glom("Genus", NArm = F) %>% 
+  transform_sample_counts(function(x) {x * 100/sum(x)})
+
+
+france_sulfur_oxidisers_rhizospere_mean <- data.frame(Genus = tax_table(france_sulfur_oxidisers_rhizosphere)[,"Genus"], Mean = rowMeans(otu_table(france_sulfur_oxidisers_rhizosphere)), row.names = NULL) %>% mutate()
+france_sulfur_oxidisers_endosphere_mean <- data.frame(Genus = tax_table(france_sulfur_oxidisers_endosphere)[,"Genus"], Mean = rowMeans(otu_table(france_sulfur_oxidisers_endosphere)), row.names = NULL)
+
+usa_sulfur_oxidisers_rhizospere_mean <- data.frame(Genus = tax_table(usa_sulfur_oxidisers_rhizosphere)[,"Genus"], Mean = rowMeans(otu_table(usa_sulfur_oxidisers_rhizosphere) %>% t()), row.names = NULL)
+usa_sulfur_oxidisers_endosphere_mean <- data.frame(Genus = tax_table(usa_sulfur_oxidisers_endosphere)[,"Genus"], Mean = rowMeans(otu_table(usa_sulfur_oxidisers_endosphere) %>% t()), row.names = NULL)
+
+
+
+
+sulfur_oxidisers_all <- inner_join(france_sulfur_oxidisers_rhizospere_mean,
+                                   france_sulfur_oxidisers_endosphere_mean, 
+                                   usa_sulfur_oxidisers_rhizospere_mean,
+                                   usa_sulfur_oxidisers_endosphere_mean, by="Genus") %>% 
+  set_colnames(c("Genus", "france_mean", "usa_mean")) %>%
+  reshape2::melt() %>%
+  mutate("role" = "Sulfur Oxidiser")
+
+############## sulfate reducers ###########
+
+france_sulfate_reducers <- subset_taxa(ps_rel, Genus %in% sulfate_reducers) %>%
+  tax_glom("Genus", NArm = F) %>% 
+  transform_sample_counts(function(x) {x * 100/sum(x)})
+
+usa_sulfate_reducers <- subset_taxa(ps_rel_jr, Genus %in% sulfate_reducers) %>%
+  tax_glom("Genus", NArm = F) %>% 
+  transform_sample_counts(function(x) {x * 100/sum(x)})
+
+france_sulfate_reducers_mean <- data.frame(Genus = tax_table(france_sulfate_reducers)[,"Genus"], Mean = rowMeans(otu_table(france_sulfate_reducers)), row.names = NULL)
+usa_sulfate_reducers_mean <- data.frame(Genus = tax_table(usa_sulfate_reducers)[,"Genus"], Mean = rowMeans(otu_table(usa_sulfate_reducers) %>% t()), row.names = NULL)
+
+sulfate_reducers_all <- inner_join(france_sulfate_reducers_mean, usa_sulfate_reducers_mean, by="Genus") %>% 
+  set_colnames(c("Genus", "france_mean", "usa_mean")) %>%
+  reshape2::melt() %>% 
+  mutate("role"="Sulfur Reducer")
+
+
+############## iron oxidisers ###########
+
+france_iron_oxidisers <- subset_taxa(ps_rel, Genus %in% iron_oxidisers) %>%
+  tax_glom("Genus", NArm = F) %>% 
+  transform_sample_counts(function(x) {x * 100/sum(x)})
+
+france_iron_oxidisers@otu_table[is.na(france_iron_oxidisers@otu_table)] <- 0
+
+usa_iron_oxidisers <- subset_taxa(ps_rel_jr, Genus %in% iron_oxidisers) %>%
+  tax_glom("Genus", NArm = F) %>% 
+  transform_sample_counts(function(x) {x * 100/sum(x)})
+
+usa_iron_oxidisers@otu_table[is.na(usa_iron_oxidisers@otu_table)] <- 0
+
+france_iron_oxidisers_mean <- data.frame(Genus = tax_table(france_iron_oxidisers)[,"Genus"], Mean = rowMeans(otu_table(france_iron_oxidisers)), row.names = NULL)
+usa_iron_oxidisers_mean <- data.frame(Genus = tax_table(usa_iron_oxidisers)[,"Genus"], Mean = rowMeans(otu_table(usa_iron_oxidisers) %>% t()), row.names = NULL)
+
+iron_oxidisers_all <- inner_join(france_iron_oxidisers_mean, usa_iron_oxidisers_mean, by="Genus") %>% 
+  set_colnames(c("Genus", "france_mean", "usa_mean")) %>%
+  reshape2::melt() %>% 
+  mutate("role"="Iron Oxidiser")
+
+
+############## nitrifiers ###########
+
+france_nitrifiers <- subset_taxa(ps_rel, Genus %in% nitrifiers) %>%
+  tax_glom("Genus", NArm = F) %>% 
+  transform_sample_counts(function(x) {x * 100/sum(x)})
+
+france_nitrifiers@otu_table[is.na(france_nitrifiers@otu_table)] <- 0
+
+usa_nitrifiers <- subset_taxa(ps_rel_jr, Genus %in% nitrifiers) %>%
+  tax_glom("Genus", NArm = F) %>% 
+  transform_sample_counts(function(x) {x * 100/sum(x)})
+
+usa_nitrifiers@otu_table[is.na(usa_nitrifiers@otu_table)] <- 0
+
+france_nitrifiers_mean <- data.frame(Genus = tax_table(france_nitrifiers)[,"Genus"], Mean = rowMeans(otu_table(france_nitrifiers)), row.names = NULL)
+usa_nitrifiers_mean <- data.frame(Genus = tax_table(usa_nitrifiers)[,"Genus"], Mean = rowMeans(otu_table(usa_nitrifiers) %>% t()), row.names = NULL)
+
+nitrifiers_all <- inner_join(france_nitrifiers_mean, usa_nitrifiers_mean, by="Genus") %>% 
+  set_colnames(c("Genus", "france_mean", "usa_mean")) %>%
+  reshape2::melt() %>% 
+  mutate("role"="Nitrifier")
+
+
+
+
+rbind(sulfate_reducers_all, sulfur_oxidisers_all, iron_oxidisers_all, nitrifiers_all) %>%
+  mutate(Genus = fct_reorder(Genus, as.numeric(as.factor(role)))) %>%
+  ggplot(aes(y = Genus, x = variable)) + 
+  geom_point(aes(size = sqrt(value), fill = role), alpha = 0.75, shape = 21)
 
 
